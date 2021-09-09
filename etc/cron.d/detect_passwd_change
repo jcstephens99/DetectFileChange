@@ -1,0 +1,2 @@
+# Detect any changes for file /etc/password every 15 minutes
+*/15 * * * * root /usr/bin/detect_file_change /etc/passwd

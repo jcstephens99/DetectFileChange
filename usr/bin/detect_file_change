@@ -1,0 +1,86 @@
+#!/bin/bash
+
+DFC_FILE_TO_CHECK=$1
+DFC_LOG_FILE="/var/log/dfc.log"
+DFC_STATE_DIRECTORY="/var/lib/dfc"
+DFC_CHECKSUM_PROGRAM="/usr/bin/sha256sum"
+DFC_DATE_FORMAT="%b %d %H:%M:%S"
+
+
+
+# If no file was provided as an argument
+if [[ -z "$DFC_FILE_TO_CHECK" ]]; then
+  echo "dfc: No file provided as argument. Exiting."
+  exit 1
+# If file to check doesn't exist
+elif [[ ! -f "$DFC_FILE_TO_CHECK" ]]; then
+  echo "dfc: File to check doesn't exist. Exiting."
+  exit 1
+fi
+
+# If logfile doesn't exist
+if [[ ! -f "$DFC_LOG_FILE" ]]; then
+  # Attempt to create log file
+  touch "$DFC_LOG_FILE"
+  if [[ $? -ne 0 ]]; then
+    echo "dfc: Failed to create dfc log file. Exiting."
+    exit 1
+  fi
+fi
+
+# If state directory doesn't exist
+if [[ ! -d "$DFC_STATE_DIRECTORY" ]]; then
+  # Attempt to create state directory
+  mkdir "$DFC_STATE_DIRECTORY"
+  if [[ $? -ne 0 ]]; then
+    echo "dfc: Failed to create dfc state directory. Exiting."
+    exit 1
+  fi
+fi
+
+  
+
+# Use full path to ensure a unique checksum
+DFC_FILE_REALPATH=$(readlink -f "$DFC_FILE_TO_CHECK")
+# Get the checksum of the actual path of the file to check. This is used to create a unique state file for any given filepath
+DFC_FILEPATH_CHECKSUM=$(echo "$DFC_FILE_REALPATH" | "$DFC_CHECKSUM_PROGRAM" | cut -d ' ' -f1)
+if [[ $? -ne 0 ]]; then
+  echo "dfc: Failed to get checksum for file name to be checked. Exiting."
+  exit 1
+fi
+
+# Get checksum of file to check
+DFC_FILE_CHECKSUM=$("$DFC_CHECKSUM_PROGRAM" "$DFC_FILE_TO_CHECK")
+if [[ $? -ne 0 ]] || [[ -z "$DFC_FILE_CHECKSUM" ]]; then
+  echo "dfc: Failed to get checksum for file $DFC_FILE_TO_CHECK. Exiting."
+  exit 1
+fi
+
+# Path of the state file
+DFC_STATE_FILEPATH="$DFC_STATE_DIRECTORY/$DFC_FILEPATH_CHECKSUM"
+# If state file doesn't currently exist
+if [[ ! -f $DFC_STATE_FILEPATH ]]; then
+  # Attempt to create state file
+  touch "$DFC_STATE_FILEPATH"
+  if [[ $? -ne 0 ]]; then
+    echo "dfc: Failed to create state file for path: $DFC_STATE_FILEPATH. Exiting."
+    exit 1
+  fi
+  # Save current file checksum to state filepath
+  echo -n "$DFC_FILE_CHECKSUM" > "$DFC_STATE_FILEPATH"
+else
+  DFC_PREVIOUS_CHECKSUM=$(cat "$DFC_STATE_FILEPATH")
+  # If checksum is different from past run
+  if [[ "$DFC_FILE_CHECKSUM" != "$DFC_PREVIOUS_CHECKSUM" ]]; then
+    # Log the change
+    echo "$(date +"$DFC_DATE_FORMAT"): File $DFC_FILE_REALPATH was detected to have changed." >> "$DFC_LOG_FILE"
+    # Check if there was an error
+    if [[ $? -ne 0 ]]; then
+      echo "dfc: Failed to write checksum to state file: $DFC_STATE_FILEPATH. Exiting."
+      exit 1
+    else
+      # Write new checksum to state filepath
+      echo -n "$DFC_FILE_CHECKSUM" > "$DFC_STATE_FILEPATH"
+    fi
+  fi
+fi
